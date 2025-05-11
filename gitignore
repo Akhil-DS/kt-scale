@@ -1,0 +1,9 @@
+
+# Exclude sensitive files
+.env
+*.pyc
+__pycache__/
+*.log
+.DS_Store
+.vscode/
+openai_api_key.txt
