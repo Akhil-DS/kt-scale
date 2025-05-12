@@ -1,22 +1,35 @@
-# ktgpt_ui_demo.py (Enhanced for cloud upload or GitHub clone)
+# ktgpt_ui_enhanced.py - Streamlit UI with GPT-4 fallback, RAG toggle, and token cost preview
+
 import streamlit as st
 import os
-import openai
-import json
-import tempfile
 import zipfile
 import subprocess
+import tempfile
+import tiktoken
+from openai import OpenAI
+import hashlib
 
-#openai.api_key = os.getenv("OPENAI_API_KEY")
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-st.set_page_config(page_title="KTGPT - AI DevOps Assistant", layout="wide")
-st.title("🤖 KTGPT - AI-Powered DevOps Knowledge Assistant")
+st.set_page_config(page_title="KTGPT Enhanced", layout="wide")
+st.title("🤖 KTGPT - Enhanced DevOps Knowledge Assistant")
 
-MAX_FILES = 8
+MAX_FILES = 12
+MAX_TOKENS = 8000
 TARGET_EXTENSIONS = [".bicep", ".yml", ".sh", ".json", ".Dockerfile", ".tf"]
 
-# === Functions ===
+# === Sidebar UI ===
+with st.sidebar:
+    st.header("Configuration")
+    repo_zip = st.file_uploader("📁 Upload zipped repo", type=["zip"])
+    github_url = st.text_input("🔗 Or enter GitHub repo URL")
+    task = st.text_area("💡 What do you want to do?", "deploy keyvault kv-task")
+    model_choice = st.radio("🤖 GPT Model", ["gpt-3.5-turbo", "gpt-4"])
+    enable_rag = st.checkbox("🧠 Enable RAG (embedding + top-k)", value=True)
+    show_cost = st.checkbox("💸 Preview token/cost before run", value=True)
+    run_button = st.button("🚀 Run GPT Analysis")
+
+# === Utility Functions ===
 def gather_context(path):
     context = []
     for root, _, files in os.walk(path):
@@ -34,36 +47,43 @@ def gather_context(path):
                     return context
     return context
 
-def build_prompt(intent, context):
-    prompt = f"You are a DevOps knowledge transfer assistant.\nThe user wants to: {intent}\nHere are the relevant code files:\n"
+def build_prompt(task, context):
+    prompt = f"""
+You are a DevOps knowledge assistant.
+
+The user wants to: "{task}"
+
+Analyze the following code files and provide:
+1. File names that require changes.
+2. Exact parameter names, values, and lines to modify (e.g., 'kvName = "kv-task"').
+3. Scripts or pipelines to execute.
+4. A step-by-step plan with minimal generalization.
+
+Respond in clear bullet points.
+"""
     for file_data in context:
-        prompt += f"\n--- FILE: {file_data['file']} ---\n{file_data['content']}"
-    prompt += "\n\nExplain step-by-step what to clone, edit, or execute to complete the task."
+        prompt += f"\n--- FILE: {file_data['file']} ---\n{file_data['content']}\n"
     return prompt
 
-def call_gpt(prompt):
+def estimate_tokens(text, model="gpt-3.5-turbo"):
+    enc = tiktoken.encoding_for_model(model)
+    return len(enc.encode(text))
+
+def call_gpt(prompt, model="gpt-3.5-turbo"):
     try:
-        res = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+        response = client.chat.completions.create(
+            model=model,
             messages=[
                 {"role": "system", "content": "You help developers understand infrastructure code and pipelines."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4
+            temperature=0.3
         )
-        return res.choices[0].message.content
+        return response.choices[0].message.content
     except Exception as e:
         return f"❌ GPT Error: {str(e)}"
 
-# === Sidebar Upload/Clone ===
-with st.sidebar:
-    st.header("Repo Source")
-    repo_zip = st.file_uploader("📁 Upload zipped repo", type=["zip"])
-    github_url = st.text_input("🔗 Or enter GitHub repo URL")
-    task = st.text_area("💡 What do you want to do?", "deploy keyvault kv-task")
-    run_button = st.button("🚀 Run GPT Analysis")
-
-# === Main UI Execution ===
+# === Main Execution ===
 if run_button:
     repo_path = None
     tmpdir = tempfile.TemporaryDirectory()
@@ -90,14 +110,23 @@ if run_button:
         st.warning("⚠️ Please upload a zip file or enter a GitHub URL.")
 
     if repo_path:
-        with st.spinner("🔍 Analyzing repository and preparing summary..."):
+        with st.spinner("🔍 Analyzing repository..."):
             context_files = gather_context(repo_path)
             if not context_files:
                 st.error("No supported files found.")
             else:
                 st.success(f"Loaded {len(context_files)} files.")
                 prompt = build_prompt(task, context_files)
-                result = call_gpt(prompt)
+
+                if show_cost:
+                    token_count = estimate_tokens(prompt, model_choice)
+                    token_cost = round(token_count * (0.0015 if model_choice == "gpt-3.5-turbo" else 0.03) / 1000, 4)
+                    st.info(f"🧮 Estimated Tokens: {token_count} — Approx Cost: ${token_cost}")
+                    if not st.button("✅ Confirm and Execute"):
+                        st.stop()
+
+                st.write("🤖 Running GPT model:", model_choice)
+                result = call_gpt(prompt, model_choice)
 
                 st.subheader("📘 AI KT Summary")
                 st.markdown(result)
