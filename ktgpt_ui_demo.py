@@ -1,4 +1,4 @@
-# ktgpt_ui_enhanced.py - Streamlit UI with GPT-4 fallback, RAG toggle, and token cost preview
+# ktgpt_ui_enhanced.py - with fallback output rendering and empty response fix
 
 import streamlit as st
 import os
@@ -7,14 +7,13 @@ import subprocess
 import tempfile
 import tiktoken
 from openai import OpenAI
-import hashlib
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 st.set_page_config(page_title="KTGPT Enhanced", layout="wide")
 st.title("🤖 KTGPT - Enhanced DevOps Knowledge Assistant")
 
-MAX_FILES = 12
+MAX_FILES = 10
 MAX_TOKENS = 8000
 TARGET_EXTENSIONS = [".bicep", ".yml", ".sh", ".json", ".Dockerfile", ".tf"]
 
@@ -29,7 +28,7 @@ with st.sidebar:
     show_cost = st.checkbox("💸 Preview token/cost before run", value=True)
     run_button = st.button("🚀 Run GPT Analysis")
 
-# === Utility Functions ===
+# === Functions ===
 def gather_context(path):
     context = []
     for root, _, files in os.walk(path):
@@ -40,7 +39,7 @@ def gather_context(path):
                 try:
                     with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
                         content = f.read()
-                        context.append({"file": full_path, "content": content[:2000]})
+                        context.append({"file": full_path, "content": content[:1000]})
                 except Exception as e:
                     st.warning(f"Error reading {full_path}: {e}")
                 if len(context) >= MAX_FILES:
@@ -79,7 +78,8 @@ def call_gpt(prompt, model="gpt-3.5-turbo"):
             ],
             temperature=0.3
         )
-        return response.choices[0].message.content
+        output = response.choices[0].message.content.strip()
+        return output if output else "⚠️ GPT returned an empty response."
     except Exception as e:
         return f"❌ GPT Error: {str(e)}"
 
@@ -125,15 +125,18 @@ if run_button:
                     if not st.button("✅ Confirm and Execute"):
                         st.stop()
 
-                st.write("🤖 Running GPT model:", model_choice)
                 result = call_gpt(prompt, model_choice)
 
                 st.subheader("📘 AI KT Summary")
-                st.markdown(result)
+                if result.strip().startswith("❌") or result.strip().startswith("⚠️"):
+                    st.warning(result)
+                else:
+                    st.markdown(result)
+                    st.code(result, language="markdown")
 
-                st.download_button(
-                    label="💾 Download Summary as Markdown",
-                    data=result,
-                    file_name="KTGPT_GPT_Summary.md",
-                    mime="text/markdown"
-                )
+                    st.download_button(
+                        label="💾 Download Summary as Markdown",
+                        data=result,
+                        file_name="KTGPT_GPT_Summary.md",
+                        mime="text/markdown"
+                    )
