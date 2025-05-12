@@ -7,7 +7,8 @@ import tempfile
 import zipfile
 import subprocess
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+#openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 st.set_page_config(page_title="KTGPT - AI DevOps Assistant", layout="wide")
 st.title("🤖 KTGPT - AI-Powered DevOps Knowledge Assistant")
@@ -42,7 +43,7 @@ def build_prompt(intent, context):
 
 def call_gpt(prompt):
     try:
-        res = openai.ChatCompletion.create(
+        res = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You help developers understand infrastructure code and pipelines."},
