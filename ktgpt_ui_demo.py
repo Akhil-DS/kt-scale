@@ -1,22 +1,16 @@
-# ktgpt_ui_demo.py
-# Streamlit UI for KTGPT task-based AI assistant
-
+# ktgpt_ui_demo.py (Enhanced for cloud upload or GitHub clone)
 import streamlit as st
 import os
 import openai
 import json
 import tempfile
+import zipfile
+import subprocess
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 st.set_page_config(page_title="KTGPT - AI DevOps Assistant", layout="wide")
 st.title("🤖 KTGPT - AI-Powered DevOps Knowledge Assistant")
-
-with st.sidebar:
-    st.header("Configuration")
-    repo_path = st.text_input("📂 Local repo path", value="./KTGPT_PoC_Demo")
-    task = st.text_area("💡 What do you want to do?", "deploy keyvault kv-task")
-    run_button = st.button("🚀 Run GPT Analysis")
 
 MAX_FILES = 8
 TARGET_EXTENSIONS = [".bicep", ".yml", ".sh", ".json", ".Dockerfile", ".tf"]
@@ -60,27 +54,56 @@ def call_gpt(prompt):
     except Exception as e:
         return f"❌ GPT Error: {str(e)}"
 
-# === UI Logic ===
+# === Sidebar Upload/Clone ===
+with st.sidebar:
+    st.header("Repo Source")
+    repo_zip = st.file_uploader("📁 Upload zipped repo", type=["zip"])
+    github_url = st.text_input("🔗 Or enter GitHub repo URL")
+    task = st.text_area("💡 What do you want to do?", "deploy keyvault kv-task")
+    run_button = st.button("🚀 Run GPT Analysis")
+
+# === Main UI Execution ===
 if run_button:
-    with st.spinner("🔍 Analyzing repository and preparing summary..."):
-        context_files = gather_context(repo_path)
-        if not context_files:
-            st.error("No files found or invalid path.")
-        else:
-            st.success(f"Loaded {len(context_files)} files.")
-            prompt = build_prompt(task, context_files)
-            result = call_gpt(prompt)
+    repo_path = None
+    tmpdir = tempfile.TemporaryDirectory()
+    tmp_path = tmpdir.name
 
-            st.subheader("📘 AI KT Summary")
-            st.markdown(result)
+    if repo_zip:
+        zip_path = os.path.join(tmp_path, "repo.zip")
+        with open(zip_path, "wb") as f:
+            f.write(repo_zip.read())
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(tmp_path)
+        repo_path = tmp_path
+        st.success("✅ Zipped repo extracted.")
 
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".md", mode="w", encoding="utf-8") as f:
-                f.write(result)
-                summary_path = f.name
+    elif github_url:
+        try:
+            subprocess.run(["git", "clone", github_url, tmp_path], check=True)
+            repo_path = tmp_path
+            st.success("✅ GitHub repo cloned.")
+        except subprocess.CalledProcessError as e:
+            st.error(f"❌ Git clone failed: {str(e)}")
 
-            st.download_button(
-                label="💾 Download Summary as Markdown",
-                data=result,
-                file_name="KTGPT_GPT_Summary.md",
-                mime="text/markdown"
-            )
+    else:
+        st.warning("⚠️ Please upload a zip file or enter a GitHub URL.")
+
+    if repo_path:
+        with st.spinner("🔍 Analyzing repository and preparing summary..."):
+            context_files = gather_context(repo_path)
+            if not context_files:
+                st.error("No supported files found.")
+            else:
+                st.success(f"Loaded {len(context_files)} files.")
+                prompt = build_prompt(task, context_files)
+                result = call_gpt(prompt)
+
+                st.subheader("📘 AI KT Summary")
+                st.markdown(result)
+
+                st.download_button(
+                    label="💾 Download Summary as Markdown",
+                    data=result,
+                    file_name="KTGPT_GPT_Summary.md",
+                    mime="text/markdown"
+                )
